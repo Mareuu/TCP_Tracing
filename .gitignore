@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Results and outputs
+results/
+refined_results/
+*.jsonl
+*.pkl
+*.log
+*_debug.txt
+*_final.py
+
+# Data directories (don't commit large datasets)
+data/
+arc-prize-2024/
+arc-prize-2025/
+/home/ubuntu/tcp/
+
+# Model checkpoints and weights
+models/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# Coverage and testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Documentation builds
+docs/_build/
+
+# Environment variables
+.env
+.env.local
+
+# System files
+Thumbs.db
