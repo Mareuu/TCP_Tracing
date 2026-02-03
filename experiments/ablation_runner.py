@@ -52,6 +52,14 @@ ABLATION_EXPERIMENT_CONFIGS = {
         "description": "Pure numerical feedback without domain interpretation",
         "args": ["--ablation_mode", "raw_feedback_only", "--feedback_style", "raw"],
     },
+    "heuristic_free": {
+        "description": "Completely heuristic-free: raw feedback + history-based strategy + fixed temperature",
+        "args": ["--ablation_mode", "heuristic_free"],
+    },
+    "history_based_strategy": {
+        "description": "History-based strategy selection (no accuracy thresholds)",
+        "args": ["--ablation_mode", "history_based_strategy", "--strategy_mode", "history_based"],
+    },
     "no_structural_hints": {
         "description": "Structural hints disabled",
         "args": ["--disable_structural_hints"],
@@ -68,6 +76,38 @@ ABLATION_EXPERIMENT_CONFIGS = {
         "description": "Fixed temperature (no adaptive adjustment)",
         "args": ["--temperature_mode", "fixed"],
     },
+    # =========================================================================
+    # Feedback Granularity Ablation Ladder
+    # These experiments test the minimal sufficient feedback hypothesis
+    # =========================================================================
+    "feedback_none": {
+        "description": "Level 0: No feedback - just 'your code failed, try again'",
+        "args": ["--ablation_mode", "feedback_none", "--feedback_granularity", "0"],
+    },
+    "feedback_binary": {
+        "description": "Level 1: Binary pass/fail feedback only",
+        "args": ["--ablation_mode", "feedback_binary", "--feedback_granularity", "1"],
+    },
+    "feedback_accuracy": {
+        "description": "Level 2: Accuracy score only",
+        "args": ["--ablation_mode", "feedback_accuracy", "--feedback_granularity", "2"],
+    },
+    "feedback_shape": {
+        "description": "Level 3: Accuracy + shape match info",
+        "args": ["--ablation_mode", "feedback_shape", "--feedback_granularity", "3"],
+    },
+    "feedback_count": {
+        "description": "Level 4: Accuracy + shape + error counts",
+        "args": ["--ablation_mode", "feedback_count", "--feedback_granularity", "4"],
+    },
+    "feedback_position": {
+        "description": "Level 5: Full raw metrics including error positions",
+        "args": ["--ablation_mode", "feedback_position", "--feedback_granularity", "5"],
+    },
+    "feedback_full_raw": {
+        "description": "Level 6: All raw metrics (no domain interpretation)",
+        "args": ["--ablation_mode", "feedback_full_raw", "--feedback_granularity", "6"],
+    },
 }
 
 
@@ -78,22 +118,39 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Available experiments:
-  full_system          Full TCP system with all heuristics (baseline)
-  no_heuristics        Feedback-only: all domain heuristics disabled
-  feedback_only        Pure feedback mechanism (alias for no_heuristics)
-  heuristics_only      Domain heuristics with minimal feedback
-  no_feedback          Domain heuristics only, no evaluation feedback
-  raw_feedback_only    Pure numerical feedback without domain interpretation
-  no_structural_hints  Structural hints disabled
-  no_adaptive_strategy Adaptive strategy selection disabled
-  no_accuracy_hints    Accuracy-based hints disabled
-  fixed_temperature    Fixed temperature (no adaptive adjustment)
+  full_system           Full TCP system with all heuristics (baseline)
+  no_heuristics         Feedback-only: all domain heuristics disabled
+  feedback_only         Pure feedback mechanism (alias for no_heuristics)
+  heuristics_only       Domain heuristics with minimal feedback
+  no_feedback           Domain heuristics only, no evaluation feedback
+  raw_feedback_only     Pure numerical feedback without domain interpretation
+  heuristic_free        Completely heuristic-free (raw + history-based + fixed temp)
+  history_based_strategy  History-based strategy (no accuracy thresholds)
+  no_structural_hints   Structural hints disabled
+  no_adaptive_strategy  Adaptive strategy selection disabled
+  no_accuracy_hints     Accuracy-based hints disabled
+  fixed_temperature     Fixed temperature (no adaptive adjustment)
+
+Feedback Granularity Ablation (minimal sufficient feedback study):
+  feedback_none         Level 0: No feedback - just 'try again'
+  feedback_binary       Level 1: Binary pass/fail only
+  feedback_accuracy     Level 2: Accuracy score only
+  feedback_shape        Level 3: Accuracy + shape match
+  feedback_count        Level 4: + error counts
+  feedback_position     Level 5: + error positions
+  feedback_full_raw     Level 6: All raw metrics (no interpretation)
 
 Example:
   python experiments/ablation_runner.py \\
-      --experiments full_system no_heuristics raw_feedback_only no_feedback \\
+      --experiments full_system heuristic_free history_based_strategy no_feedback \\
       --base_args "--path_feedback data/feedback.jsonl --path_model model_name" \\
       --output_dir results/ablation/
+
+Example (feedback granularity ablation):
+  python experiments/ablation_runner.py \\
+      --experiments feedback_none feedback_binary feedback_accuracy feedback_position full_system \\
+      --base_args "--path_feedback data/feedback.jsonl --path_model model_name" \\
+      --output_dir results/feedback_ablation/
         """
     )
 

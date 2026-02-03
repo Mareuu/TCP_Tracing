@@ -165,7 +165,8 @@ def generate_dynamic_feedback(
     all_pair_results: List[Dict[str, Any]],
     avg_pixel_accuracy: float,
     force_level: Optional[int] = None,
-    feedback_style: str = "interpreted"
+    feedback_style: str = "interpreted",
+    feedback_granularity: int = 7
 ) -> List[str]:
     """
     Generates feedback with a dynamic level of detail based on average accuracy.
@@ -182,10 +183,13 @@ def generate_dynamic_feedback(
         feedback_style: Feedback style ("interpreted" or "raw")
             - "interpreted": Domain-specific feedback with hints and explanations
             - "raw": Pure numerical feedback without domain interpretation
+        feedback_granularity: Granularity level for feedback (0-7)
+            Used for minimal feedback ablation study. Lower = less info.
+            0=none, 1=binary, 2=accuracy, 3=shape, 4=count, 5=position, 6=full_raw, 7=interpreted
     """
-    # Handle raw feedback mode
-    if feedback_style == "raw":
-        from tcp_core.raw_feedback import RawFeedbackGenerator, RawFeedbackResult
+    # Handle raw feedback mode with granularity control
+    if feedback_style == "raw" or feedback_granularity < 7:
+        from tcp_core.raw_feedback import RawFeedbackGenerator, RawFeedbackResult, FeedbackGranularity
 
         raw_feedbacks = []
         for result in all_pair_results:
@@ -206,8 +210,9 @@ def generate_dynamic_feedback(
             )
             raw_feedbacks.append(raw_fb)
 
-        # Return aggregated raw feedback as string
-        return [RawFeedbackGenerator.format_aggregate_as_string(raw_feedbacks)]
+        # Format at the specified granularity level
+        granularity = FeedbackGranularity(min(feedback_granularity, 6))  # Cap at 6 for raw
+        return [RawFeedbackGenerator.format_aggregate_at_granularity(raw_feedbacks, granularity)]
 
     # Original interpreted feedback logic below
     feedback_points = []
@@ -316,7 +321,8 @@ def get_feedback_for_challenger_dynamic(
     puzzle_properties: Dict[str, Any],
     timeout: int = 5,
     force_level: Optional[int] = None,
-    feedback_style: str = "interpreted"
+    feedback_style: str = "interpreted",
+    feedback_granularity: int = 7
 ) -> Tuple[Optional[float], List[str]]:
     """
     Generates feedback for a challenger code with a dynamic level of detail.
@@ -328,6 +334,7 @@ def get_feedback_for_challenger_dynamic(
         timeout: Execution timeout in seconds
         force_level: Optional forced feedback level for ablation (0-3, None=adaptive)
         feedback_style: Feedback style ("interpreted" or "raw")
+        feedback_granularity: Granularity level for feedback (0-7). Lower = less info.
     """
     if not train_pairs:
         return 0.0, ["No training pairs to evaluate."]
@@ -367,7 +374,8 @@ def get_feedback_for_challenger_dynamic(
 
     feedback_strings = generate_dynamic_feedback(
         all_pair_results, average_pixel_accuracy,
-        force_level=force_level, feedback_style=feedback_style
+        force_level=force_level, feedback_style=feedback_style,
+        feedback_granularity=feedback_granularity
     )
 
     return average_pixel_accuracy, feedback_strings

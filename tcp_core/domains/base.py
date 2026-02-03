@@ -27,6 +27,109 @@ class EvaluationStatus(Enum):
     INVALID_OUTPUT = "invalid_output"        # Output format is invalid
 
 
+class ProgressState(Enum):
+    """
+    Domain-agnostic progress state for strategy selection.
+
+    This abstraction allows strategy selection without domain-specific
+    accuracy thresholds. Each domain maps its metrics to these states.
+    """
+    FAILING = "failing"          # No meaningful progress (errors, very low accuracy)
+    STRUGGLING = "struggling"    # Some progress but significant issues remain
+    PROGRESSING = "progressing"  # Making steady progress
+    CLOSE = "close"              # Near solution, minor issues
+    SOLVED = "solved"            # Problem solved
+
+
+class RepairStrategy(Enum):
+    """
+    Repair strategies for code refinement.
+
+    These are domain-agnostic strategies that can be applied
+    regardless of the problem domain.
+    """
+    COMPLETE_REWRITE = "complete_rewrite"    # Start fresh with new approach
+    MAJOR_RESTRUCTURE = "major_restructure"  # Significant changes to logic
+    TARGETED_FIX = "targeted_fix"            # Fix specific issues
+    PRECISION_FIX = "precision_fix"          # Minor adjustments
+    CONTINUE = "continue"                    # Keep current approach
+    PERFECT = "perfect"                      # Already solved
+
+
+class StrategyMode(Enum):
+    """
+    Mode for selecting repair strategy.
+
+    - ADAPTIVE_THRESHOLD: Use domain-specific accuracy thresholds (original behavior)
+    - HISTORY_BASED: Use improvement history patterns (domain-agnostic)
+    - FIXED: Always use same strategy (baseline for ablation)
+    """
+    ADAPTIVE_THRESHOLD = "adaptive_threshold"
+    HISTORY_BASED = "history_based"
+    FIXED = "fixed"
+
+
+@dataclass
+class RefinementHistory:
+    """
+    Track refinement history for history-based strategy selection.
+
+    This enables domain-agnostic strategy decisions based on
+    improvement patterns rather than absolute accuracy values.
+    """
+    accuracies: List[float] = field(default_factory=list)
+    strategies_used: List[str] = field(default_factory=list)
+    improvements: List[float] = field(default_factory=list)  # delta from previous
+
+    def add_iteration(self, accuracy: float, strategy: str):
+        """Record a refinement iteration."""
+        if self.accuracies:
+            improvement = accuracy - self.accuracies[-1]
+        else:
+            improvement = accuracy
+        self.accuracies.append(accuracy)
+        self.strategies_used.append(strategy)
+        self.improvements.append(improvement)
+
+    @property
+    def current_accuracy(self) -> float:
+        return self.accuracies[-1] if self.accuracies else 0.0
+
+    @property
+    def iterations_without_improvement(self) -> int:
+        """Count consecutive iterations without improvement."""
+        count = 0
+        for imp in reversed(self.improvements):
+            if imp <= 0.001:  # Tiny threshold for floating point
+                count += 1
+            else:
+                break
+        return count
+
+    @property
+    def recent_trend(self) -> str:
+        """Analyze recent improvement trend."""
+        if len(self.improvements) < 2:
+            return "unknown"
+        recent = self.improvements[-3:]  # Last 3 iterations
+        avg_improvement = sum(recent) / len(recent)
+        if avg_improvement > 0.05:
+            return "improving"
+        elif avg_improvement < -0.01:
+            return "regressing"
+        else:
+            return "stagnant"
+
+    @property
+    def best_accuracy(self) -> float:
+        return max(self.accuracies) if self.accuracies else 0.0
+
+    @property
+    def is_stuck(self) -> bool:
+        """Check if refinement is stuck (no progress for multiple iterations)."""
+        return self.iterations_without_improvement >= 3
+
+
 @dataclass
 class Problem:
     """
@@ -294,3 +397,206 @@ def transform(input_data):
             interpreted_str = "\n".join(feedback.interpreted_feedback)
             return f"{raw_str}\n\n# Detailed Feedback\n{interpreted_str}"
         return raw_str
+
+    # =========================================================================
+    # Strategy Selection Methods (Domain-agnostic)
+    # =========================================================================
+
+    def classify_progress(self, metrics: RawMetrics) -> ProgressState:
+        """
+        Classify current progress state from metrics.
+
+        This is the ONLY place where domain-specific thresholds should be used.
+        Override this method in subclasses for domain-specific classification.
+
+        Default implementation uses pass_rate thresholds (can be overridden).
+
+        Args:
+            metrics: Raw metrics from evaluation
+
+        Returns:
+            ProgressState classification
+        """
+        if metrics.passed:
+            return ProgressState.SOLVED
+        if metrics.execution_status in (EvaluationStatus.ERROR, EvaluationStatus.TIMEOUT):
+            return ProgressState.FAILING
+        if metrics.pass_rate >= 0.9:
+            return ProgressState.CLOSE
+        if metrics.pass_rate >= 0.5:
+            return ProgressState.PROGRESSING
+        if metrics.pass_rate >= 0.2:
+            return ProgressState.STRUGGLING
+        return ProgressState.FAILING
+
+    def get_strategy_from_progress(
+        self,
+        progress: ProgressState,
+        iteration: int
+    ) -> RepairStrategy:
+        """
+        Select repair strategy based on progress state (threshold-based mode).
+
+        This is domain-agnostic - it works with ProgressState abstraction.
+
+        Args:
+            progress: Current progress state
+            iteration: Current iteration number
+
+        Returns:
+            RepairStrategy to use
+        """
+        strategy_map = {
+            ProgressState.SOLVED: RepairStrategy.PERFECT,
+            ProgressState.CLOSE: RepairStrategy.PRECISION_FIX,
+            ProgressState.PROGRESSING: RepairStrategy.TARGETED_FIX,
+            ProgressState.STRUGGLING: RepairStrategy.MAJOR_RESTRUCTURE,
+            ProgressState.FAILING: RepairStrategy.COMPLETE_REWRITE if iteration > 2 else RepairStrategy.MAJOR_RESTRUCTURE,
+        }
+        return strategy_map.get(progress, RepairStrategy.TARGETED_FIX)
+
+    def get_strategy_from_history(
+        self,
+        history: RefinementHistory,
+        iteration: int
+    ) -> RepairStrategy:
+        """
+        Select repair strategy based on improvement history (history-based mode).
+
+        This is completely domain-agnostic - no accuracy thresholds used.
+        Strategy is determined solely by improvement patterns.
+
+        Args:
+            history: Refinement history tracking improvements
+            iteration: Current iteration number
+
+        Returns:
+            RepairStrategy to use
+        """
+        # Check if solved
+        if history.current_accuracy >= 1.0:
+            return RepairStrategy.PERFECT
+
+        # Check if stuck for multiple iterations
+        if history.is_stuck:
+            # Stuck for 3+ iterations - need drastic change
+            if history.iterations_without_improvement >= 5:
+                return RepairStrategy.COMPLETE_REWRITE
+            else:
+                return RepairStrategy.MAJOR_RESTRUCTURE
+
+        # Check recent trend
+        trend = history.recent_trend
+        if trend == "improving":
+            # Making progress - continue current approach
+            return RepairStrategy.CONTINUE
+        elif trend == "regressing":
+            # Getting worse - try different approach
+            return RepairStrategy.MAJOR_RESTRUCTURE
+        else:  # stagnant
+            # Not improving but not regressing - targeted fixes
+            return RepairStrategy.TARGETED_FIX
+
+    def get_repair_strategy(
+        self,
+        metrics: RawMetrics,
+        history: RefinementHistory,
+        iteration: int,
+        mode: StrategyMode = StrategyMode.HISTORY_BASED
+    ) -> RepairStrategy:
+        """
+        Main entry point for strategy selection.
+
+        Args:
+            metrics: Current evaluation metrics
+            history: Refinement history
+            iteration: Current iteration number
+            mode: Strategy selection mode
+
+        Returns:
+            RepairStrategy to use
+        """
+        if mode == StrategyMode.FIXED:
+            return RepairStrategy.TARGETED_FIX  # Always same strategy
+
+        elif mode == StrategyMode.ADAPTIVE_THRESHOLD:
+            # Use domain-specific thresholds via classify_progress
+            progress = self.classify_progress(metrics)
+            return self.get_strategy_from_progress(progress, iteration)
+
+        else:  # HISTORY_BASED (default, most domain-agnostic)
+            return self.get_strategy_from_history(history, iteration)
+
+    def get_feedback_detail_level(
+        self,
+        metrics: RawMetrics,
+        history: RefinementHistory,
+        mode: StrategyMode = StrategyMode.HISTORY_BASED
+    ) -> str:
+        """
+        Determine feedback detail level.
+
+        Args:
+            metrics: Current evaluation metrics
+            history: Refinement history
+            mode: Strategy selection mode
+
+        Returns:
+            Feedback level: "summary", "detailed", or "pixel-level"
+        """
+        if mode == StrategyMode.FIXED:
+            return "detailed"  # Always same level
+
+        elif mode == StrategyMode.ADAPTIVE_THRESHOLD:
+            # Threshold-based (original behavior)
+            if metrics.pass_rate >= 0.9:
+                return "pixel-level"
+            elif metrics.pass_rate >= 0.5:
+                return "detailed"
+            return "summary"
+
+        else:  # HISTORY_BASED
+            # History-based: more detail when close to solution or stuck
+            if metrics.pass_rate >= 0.95:
+                return "pixel-level"
+            elif history.is_stuck:
+                return "detailed"  # Need more info when stuck
+            elif history.recent_trend == "improving":
+                return "summary"  # Brief when making progress
+            return "detailed"
+
+    def get_num_samples(
+        self,
+        strategy: RepairStrategy,
+        iteration: int,
+        mode: StrategyMode = StrategyMode.HISTORY_BASED
+    ) -> int:
+        """
+        Determine number of samples to generate (best-of-N).
+
+        Args:
+            strategy: Current repair strategy
+            iteration: Current iteration number
+            mode: Strategy selection mode
+
+        Returns:
+            Number of samples to generate
+        """
+        if mode == StrategyMode.FIXED:
+            return 2  # Always same
+
+        # More samples for drastic strategies or early iterations
+        sample_map = {
+            RepairStrategy.COMPLETE_REWRITE: 4,
+            RepairStrategy.MAJOR_RESTRUCTURE: 3,
+            RepairStrategy.TARGETED_FIX: 2,
+            RepairStrategy.PRECISION_FIX: 3,  # More samples when close
+            RepairStrategy.CONTINUE: 2,
+            RepairStrategy.PERFECT: 1,
+        }
+        base = sample_map.get(strategy, 2)
+
+        # Boost early iterations
+        if iteration < 3:
+            return min(base + 1, 5)
+        return base

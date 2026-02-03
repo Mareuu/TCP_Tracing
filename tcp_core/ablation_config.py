@@ -54,6 +54,17 @@ class AblationConfig:
     # Feedback style control (NEW: for raw feedback ablation)
     feedback_style: str = "interpreted"  # "interpreted" or "raw"
 
+    # Strategy selection mode (NEW: for heuristic-free ablation)
+    # - "adaptive_threshold": Use domain-specific accuracy thresholds (original behavior)
+    # - "history_based": Use improvement history patterns (domain-agnostic, no thresholds)
+    # - "fixed": Always use same strategy (baseline for ablation)
+    strategy_mode: str = "adaptive_threshold"
+
+    # Feedback granularity (NEW: for minimal feedback ablation study)
+    # Controls how much information is provided in feedback
+    # 0=none, 1=binary, 2=accuracy, 3=shape, 4=count, 5=position, 6=full_raw, 7=interpreted
+    feedback_granularity: int = 7  # Default: full interpreted feedback
+
     # Metadata for experiment tracking
     config_name: str = "custom"
     description: str = ""
@@ -66,6 +77,10 @@ class AblationConfig:
             raise ValueError(f"temperature_mode must be 'adaptive' or 'fixed', got {self.temperature_mode}")
         if self.feedback_style not in ["interpreted", "raw"]:
             raise ValueError(f"feedback_style must be 'interpreted' or 'raw', got {self.feedback_style}")
+        if self.strategy_mode not in ["adaptive_threshold", "history_based", "fixed"]:
+            raise ValueError(f"strategy_mode must be 'adaptive_threshold', 'history_based', or 'fixed', got {self.strategy_mode}")
+        if self.feedback_granularity not in range(8):
+            raise ValueError(f"feedback_granularity must be 0-7, got {self.feedback_granularity}")
 
     @classmethod
     def full_system(cls) -> "AblationConfig":
@@ -206,8 +221,181 @@ class AblationConfig:
             enable_accuracy_hints=False,
             enable_color_mapping=False,
             feedback_style="raw",  # Use raw numerical feedback
+            strategy_mode="history_based",  # No threshold-based heuristics
             config_name="raw_feedback_only",
             description="Pure numerical feedback without domain interpretation"
+        )
+
+    @classmethod
+    def heuristic_free(cls) -> "AblationConfig":
+        """
+        Completely heuristic-free configuration.
+
+        All domain knowledge and heuristics disabled:
+        - No structural hints
+        - No accuracy-based hints
+        - Raw numerical feedback only
+        - History-based strategy selection (no accuracy thresholds)
+        - Fixed temperature (no adaptive adjustment)
+
+        This is the most domain-agnostic configuration possible.
+        It answers: "Does the iterative feedback loop work at all without any heuristics?"
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_size_change_hints=False,
+            enable_color_change_hints=False,
+            enable_adaptive_strategy=False,
+            enable_accuracy_hints=False,
+            enable_color_mapping=False,
+            feedback_style="raw",
+            strategy_mode="history_based",
+            temperature_mode="fixed",
+            config_name="heuristic_free",
+            description="Completely heuristic-free: raw feedback + history-based strategy + fixed temperature"
+        )
+
+    @classmethod
+    def history_based_strategy(cls) -> "AblationConfig":
+        """
+        Use history-based strategy selection instead of accuracy thresholds.
+
+        Keeps interpreted feedback but removes accuracy threshold heuristics
+        from strategy selection. Strategy is determined by improvement patterns:
+        - Stuck for 3+ iterations → complete rewrite
+        - Improving → continue current approach
+        - Stagnant → targeted fix
+
+        This answers: "Do we need accuracy thresholds for strategy selection?"
+        """
+        return cls(
+            enable_structural_hints=True,
+            enable_size_change_hints=True,
+            enable_color_change_hints=True,
+            enable_adaptive_strategy=True,  # Still use adaptive, but history-based
+            enable_accuracy_hints=True,
+            enable_color_mapping=True,
+            strategy_mode="history_based",
+            config_name="history_based_strategy",
+            description="History-based strategy selection (no accuracy thresholds)"
+        )
+
+    # =========================================================================
+    # Feedback Granularity Presets (for minimal feedback ablation study)
+    # =========================================================================
+
+    @classmethod
+    def feedback_none(cls) -> "AblationConfig":
+        """
+        Level 0: No feedback - just "your code failed, try again".
+
+        This is the extreme baseline to measure pure iteration effect
+        without any information about what went wrong.
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_accuracy_hints=False,
+            feedback_style="raw",
+            feedback_granularity=0,
+            strategy_mode="fixed",  # Can't adapt without info
+            config_name="feedback_none",
+            description="No feedback (Level 0): pure iteration baseline"
+        )
+
+    @classmethod
+    def feedback_binary(cls) -> "AblationConfig":
+        """
+        Level 1: Binary pass/fail feedback only.
+
+        Provides 1 bit of information per example.
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_accuracy_hints=False,
+            feedback_style="raw",
+            feedback_granularity=1,
+            strategy_mode="fixed",
+            config_name="feedback_binary",
+            description="Binary feedback (Level 1): pass/fail only"
+        )
+
+    @classmethod
+    def feedback_accuracy(cls) -> "AblationConfig":
+        """
+        Level 2: Accuracy score only.
+
+        Provides ~7 bits of information (0-100% range).
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_accuracy_hints=False,
+            feedback_style="raw",
+            feedback_granularity=2,
+            strategy_mode="history_based",  # Can use accuracy trend
+            config_name="feedback_accuracy",
+            description="Accuracy feedback (Level 2): score only"
+        )
+
+    @classmethod
+    def feedback_shape(cls) -> "AblationConfig":
+        """
+        Level 3: Accuracy + shape match info.
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_accuracy_hints=False,
+            feedback_style="raw",
+            feedback_granularity=3,
+            strategy_mode="history_based",
+            config_name="feedback_shape",
+            description="Shape feedback (Level 3): accuracy + shape"
+        )
+
+    @classmethod
+    def feedback_count(cls) -> "AblationConfig":
+        """
+        Level 4: Accuracy + shape + error counts.
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_accuracy_hints=False,
+            feedback_style="raw",
+            feedback_granularity=4,
+            strategy_mode="history_based",
+            config_name="feedback_count",
+            description="Count feedback (Level 4): + error counts"
+        )
+
+    @classmethod
+    def feedback_position(cls) -> "AblationConfig":
+        """
+        Level 5: Full raw metrics including error positions.
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_accuracy_hints=False,
+            feedback_style="raw",
+            feedback_granularity=5,
+            strategy_mode="history_based",
+            config_name="feedback_position",
+            description="Position feedback (Level 5): + error positions"
+        )
+
+    @classmethod
+    def feedback_full_raw(cls) -> "AblationConfig":
+        """
+        Level 6: All raw metrics (no interpretation).
+
+        Maximum numerical information without domain knowledge.
+        """
+        return cls(
+            enable_structural_hints=False,
+            enable_accuracy_hints=False,
+            feedback_style="raw",
+            feedback_granularity=6,
+            strategy_mode="history_based",
+            config_name="feedback_full_raw",
+            description="Full raw feedback (Level 6): all metrics, no interpretation"
         )
 
     @classmethod
@@ -246,6 +434,25 @@ class AblationConfig:
             config = cls.no_feedback()
         elif ablation_mode == 'raw_feedback_only':
             config = cls.raw_feedback_only()
+        elif ablation_mode == 'heuristic_free':
+            config = cls.heuristic_free()
+        elif ablation_mode == 'history_based_strategy':
+            config = cls.history_based_strategy()
+        # Feedback granularity presets
+        elif ablation_mode == 'feedback_none':
+            config = cls.feedback_none()
+        elif ablation_mode == 'feedback_binary':
+            config = cls.feedback_binary()
+        elif ablation_mode == 'feedback_accuracy':
+            config = cls.feedback_accuracy()
+        elif ablation_mode == 'feedback_shape':
+            config = cls.feedback_shape()
+        elif ablation_mode == 'feedback_count':
+            config = cls.feedback_count()
+        elif ablation_mode == 'feedback_position':
+            config = cls.feedback_position()
+        elif ablation_mode == 'feedback_full_raw':
+            config = cls.feedback_full_raw()
         else:  # 'full' or 'custom'
             config = cls.full_system()
 
@@ -273,6 +480,12 @@ class AblationConfig:
 
         if hasattr(args, 'feedback_style') and args.feedback_style:
             config.feedback_style = args.feedback_style
+
+        if hasattr(args, 'strategy_mode') and args.strategy_mode:
+            config.strategy_mode = args.strategy_mode
+
+        if hasattr(args, 'feedback_granularity') and args.feedback_granularity is not None:
+            config.feedback_granularity = args.feedback_granularity
 
         # Update config name if using custom overrides
         if ablation_mode == 'custom' or any([
@@ -306,6 +519,10 @@ class AblationConfig:
             disabled.append("adaptive_temperature")
         if config.feedback_style == "raw":
             disabled.append("interpreted_feedback(using_raw)")
+        if config.strategy_mode == "history_based":
+            disabled.append("threshold_strategy(using_history)")
+        elif config.strategy_mode == "fixed":
+            disabled.append("adaptive_strategy(using_fixed)")
 
         if disabled:
             return f"Custom config: disabled [{', '.join(disabled)}]"
@@ -323,6 +540,8 @@ class AblationConfig:
             'feedback_level': self.feedback_level,
             'temperature_mode': self.temperature_mode,
             'feedback_style': self.feedback_style,
+            'strategy_mode': self.strategy_mode,
+            'feedback_granularity': self.feedback_granularity,
             'config_name': self.config_name,
             'description': self.description,
         }
@@ -355,6 +574,10 @@ class AblationConfig:
             args.append("--temperature_mode fixed")
         if self.feedback_style == "raw":
             args.append("--feedback_style raw")
+        if self.strategy_mode != "adaptive_threshold":
+            args.append(f"--strategy_mode {self.strategy_mode}")
+        if self.feedback_granularity != 7:  # 7 is default (interpreted)
+            args.append(f"--feedback_granularity {self.feedback_granularity}")
 
         return args
 
@@ -375,23 +598,37 @@ class AblationConfig:
             "Feedback Settings:",
             f"  - Feedback level: {self.feedback_level} ({'adaptive' if self.feedback_level == -1 else ['none', 'summary', 'detailed', 'pixel-level'][self.feedback_level]})",
             f"  - Feedback style: {self.feedback_style}",
+            f"  - Feedback granularity: {self.feedback_granularity} ({['none', 'binary', 'accuracy', 'shape', 'count', 'position', 'full_raw', 'interpreted'][self.feedback_granularity]})",
             f"  - Temperature mode: {self.temperature_mode}",
+            f"  - Strategy mode: {self.strategy_mode}",
         ]
         return "\n".join(lines)
 
 
 # Predefined experiment configurations for ablation study
 ABLATION_EXPERIMENTS = {
+    # Main ablation modes
     "full_system": AblationConfig.full_system,
     "no_heuristics": AblationConfig.no_heuristics,
     "feedback_only": AblationConfig.feedback_only,
     "heuristics_only": AblationConfig.heuristics_only,
     "no_feedback": AblationConfig.no_feedback,
     "raw_feedback_only": AblationConfig.raw_feedback_only,
+    "heuristic_free": AblationConfig.heuristic_free,
+    "history_based_strategy": AblationConfig.history_based_strategy,
+    # Component ablations
     "no_structural_hints": AblationConfig.no_structural_hints,
     "no_adaptive_strategy": AblationConfig.no_adaptive_strategy,
     "no_accuracy_hints": AblationConfig.no_accuracy_hints,
     "fixed_temperature": AblationConfig.fixed_temperature,
+    # Feedback granularity ablation ladder
+    "feedback_none": AblationConfig.feedback_none,
+    "feedback_binary": AblationConfig.feedback_binary,
+    "feedback_accuracy": AblationConfig.feedback_accuracy,
+    "feedback_shape": AblationConfig.feedback_shape,
+    "feedback_count": AblationConfig.feedback_count,
+    "feedback_position": AblationConfig.feedback_position,
+    "feedback_full_raw": AblationConfig.feedback_full_raw,
 }
 
 

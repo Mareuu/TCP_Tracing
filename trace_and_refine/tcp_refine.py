@@ -25,6 +25,7 @@ import time
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from tcp_core import get_dataset, LLM_serv, AblationConfig
+from tcp_core.domains import RefinementHistory, RepairStrategy, StrategyMode
 from tcp_evaluation_utils import get_feedback_for_challenger_dynamic, NumpyEncoder, parse_code_from_response
 
 
@@ -126,11 +127,20 @@ def parse_arguments():
     # Ablation study parameters
     ablation_group = parser.add_argument_group("Ablation study parameters")
     ablation_group.add_argument("--ablation_mode", type=str, default="full",
-                               choices=["full", "no_heuristics", "feedback_only", "heuristics_only", "no_feedback", "raw_feedback_only", "custom"],
-                               help="Ablation mode: 'full' (default), 'no_heuristics', 'feedback_only', 'heuristics_only', 'no_feedback', 'raw_feedback_only', 'custom'")
+                               choices=["full", "no_heuristics", "feedback_only", "heuristics_only", "no_feedback",
+                                        "raw_feedback_only", "heuristic_free", "history_based_strategy",
+                                        "feedback_none", "feedback_binary", "feedback_accuracy", "feedback_shape",
+                                        "feedback_count", "feedback_position", "feedback_full_raw", "custom"],
+                               help="Ablation mode: 'full', 'no_heuristics', etc. Use 'feedback_*' presets for granularity ablation")
     ablation_group.add_argument("--feedback_style", type=str, default=None,
                                choices=["interpreted", "raw"],
                                help="Feedback style: 'interpreted' (default) for domain-specific feedback, 'raw' for pure numerical feedback")
+    ablation_group.add_argument("--strategy_mode", type=str, default=None,
+                               choices=["adaptive_threshold", "history_based", "fixed"],
+                               help="Strategy selection mode: 'adaptive_threshold' (default) uses accuracy thresholds, 'history_based' uses improvement patterns (domain-agnostic), 'fixed' always uses same strategy")
+    ablation_group.add_argument("--feedback_granularity", type=int, default=None,
+                               choices=[0, 1, 2, 3, 4, 5, 6, 7],
+                               help="Feedback granularity level (0-7): 0=none, 1=binary, 2=accuracy, 3=shape, 4=count, 5=position, 6=full_raw, 7=interpreted (default)")
     ablation_group.add_argument("--disable_structural_hints", action="store_true",
                                help="Disable structural hints (grid size/color change analysis)")
     ablation_group.add_argument("--disable_adaptive_strategy", action="store_true",
@@ -195,12 +205,14 @@ for item in feedback_data:
         # Handle plain string format
         champion_code = failed_code_raw
 
-    # Get initial champion accuracy (use force_level and feedback_style from ablation config)
+    # Get initial champion accuracy (use force_level, feedback_style, feedback_granularity from ablation config)
     force_level = ablation_config.feedback_level if ablation_config.feedback_level >= 0 else None
     feedback_style = ablation_config.feedback_style
+    feedback_granularity = ablation_config.feedback_granularity
     champion_accuracy, champion_feedback = get_feedback_for_challenger_dynamic(
         champion_code, task_data['train'], puzzle_properties,
-        force_level=force_level, feedback_style=feedback_style)
+        force_level=force_level, feedback_style=feedback_style,
+        feedback_granularity=feedback_granularity)
     if champion_accuracy is None:
         champion_accuracy = 0.0
 
@@ -226,6 +238,7 @@ for item in feedback_data:
         debug_file.write(f"Base temperature: {args.temperature}\n")
         debug_file.write(f"Temperature mode: {ablation_config.temperature_mode}\n")
         debug_file.write(f"Feedback style: {ablation_config.feedback_style}\n")
+        debug_file.write(f"Strategy mode: {ablation_config.strategy_mode}\n")
         debug_file.write(f"Pattern hints: {', '.join(structural_hints) if structural_hints else 'DISABLED'}\n")
         debug_file.write(f"Adaptive strategy: {'ON' if ablation_config.enable_adaptive_strategy else 'OFF'}\n")
         debug_file.write(f"Accuracy hints: {'ON' if ablation_config.enable_accuracy_hints else 'OFF'}\n\n")
@@ -250,6 +263,13 @@ for item in feedback_data:
         previous_champion_code = ""
         previous_hypotheses = []  # Track tried hypotheses to avoid repetition
 
+        # Initialize refinement history for history-based strategy selection
+        refinement_history = RefinementHistory()
+        refinement_history.add_iteration(champion_accuracy, "initial")
+
+        # Determine strategy mode
+        strategy_mode = StrategyMode(ablation_config.strategy_mode)
+
         for i in range(args.max_refinement_retries):
             iteration_start_time = time.time()
 
@@ -263,9 +283,40 @@ for item in feedback_data:
             print(f"\n--- Task: {task_id}, Iteration: {i+1}/{args.max_refinement_retries} ---")
             print(f"Current Champion Accuracy: {champion_accuracy:.4f}")
 
-            # Determine repair strategy based on accuracy and history
-            # (controlled by ablation_config.enable_adaptive_strategy)
-            if ablation_config.enable_adaptive_strategy:
+            # Determine repair strategy based on strategy_mode
+            # This is now domain-agnostic when using history_based mode
+            if not ablation_config.enable_adaptive_strategy:
+                # Adaptive strategy completely disabled
+                repair_strategy = "standard_repair"
+                print("Strategy: STANDARD REPAIR (adaptive strategy disabled)")
+            elif strategy_mode == StrategyMode.FIXED:
+                # Fixed strategy for ablation baseline
+                repair_strategy = "targeted_fix"
+                print("Strategy: TARGETED FIX (fixed strategy mode)")
+            elif strategy_mode == StrategyMode.HISTORY_BASED:
+                # History-based strategy selection (domain-agnostic, no thresholds)
+                if refinement_history.current_accuracy >= 1.0:
+                    repair_strategy = "perfect"
+                    print("Strategy: Already perfect!")
+                elif refinement_history.is_stuck:
+                    # Stuck for 3+ iterations
+                    if refinement_history.iterations_without_improvement >= 5:
+                        repair_strategy = "complete_rewrite"
+                        print(f"Strategy: COMPLETE REWRITE (stuck for {refinement_history.iterations_without_improvement} iterations)")
+                    else:
+                        repair_strategy = "major_restructure"
+                        print(f"Strategy: MAJOR RESTRUCTURE (stuck for {refinement_history.iterations_without_improvement} iterations)")
+                elif refinement_history.recent_trend == "improving":
+                    repair_strategy = "continue"
+                    print(f"Strategy: CONTINUE (improving trend)")
+                elif refinement_history.recent_trend == "regressing":
+                    repair_strategy = "major_restructure"
+                    print(f"Strategy: MAJOR RESTRUCTURE (regressing trend)")
+                else:  # stagnant or unknown
+                    repair_strategy = "targeted_fix"
+                    print(f"Strategy: TARGETED FIX (stagnant trend)")
+            else:
+                # ADAPTIVE_THRESHOLD mode (original behavior with accuracy thresholds)
                 if champion_accuracy < 0.25 and i > 2:
                     repair_strategy = "complete_rewrite"
                     print("Strategy: COMPLETE REWRITE (fundamentally wrong approach)")
@@ -284,10 +335,6 @@ for item in feedback_data:
                 else:
                     repair_strategy = "perfect"
                     print("Strategy: Already perfect!")
-            else:
-                # Fixed strategy when adaptive strategy is disabled
-                repair_strategy = "standard_repair"
-                print("Strategy: STANDARD REPAIR (adaptive strategy disabled)")
 
             # Temperature selection based on mode (controlled by ablation_config)
             if ablation_config.temperature_mode == "fixed":
@@ -583,7 +630,8 @@ Your new hypothesis MUST be different from the current code's logic and from pre
                 if sample_code:
                     sample_accuracy, sample_feedback = get_feedback_for_challenger_dynamic(
                         sample_code, task_data['train'], puzzle_properties,
-                        force_level=force_level, feedback_style=feedback_style)
+                        force_level=force_level, feedback_style=feedback_style,
+                        feedback_granularity=feedback_granularity)
                     if sample_accuracy is None:
                         sample_accuracy = 0.0
 
@@ -643,6 +691,11 @@ Your new hypothesis MUST be different from the current code's logic and from pre
                     previous_champion_accuracy = champion_accuracy
                     previous_champion_code = champion_code
 
+            # Update refinement history for history-based strategy selection
+            refinement_history.add_iteration(champion_accuracy, repair_strategy)
+            iteration_log_entry["history_trend"] = refinement_history.recent_trend
+            iteration_log_entry["iterations_without_improvement"] = refinement_history.iterations_without_improvement
+
             log_file.write(json.dumps(iteration_log_entry, cls=NumpyEncoder) + '\n')
 
             # Write debug info
@@ -659,7 +712,8 @@ Your new hypothesis MUST be different from the current code's logic and from pre
                 if task_data.get('test'):
                     test_accuracy, test_feedback = get_feedback_for_challenger_dynamic(
                         champion_code, task_data['test'], puzzle_properties,
-                        force_level=force_level, feedback_style=feedback_style)
+                        force_level=force_level, feedback_style=feedback_style,
+                        feedback_granularity=feedback_granularity)
                     if test_accuracy == 1.0:
                         print(f"SUCCESS: Task {task_id} solved on test set!")
                         log_entry = {

@@ -31,7 +31,12 @@ from .prompt import (
 )
 from .sandbox import check_solutions, Sandbox, extract_transform, format_all_generation
 from .ablation_config import AblationConfig, get_ablation_config, list_ablation_configs, ABLATION_EXPERIMENTS
-from .raw_feedback import RawFeedbackGenerator, RawFeedbackResult
+from .raw_feedback import (
+    RawFeedbackGenerator,
+    RawFeedbackResult,
+    FeedbackGranularity,
+    GRANULARITY_NAMES,
+)
 
 # Domain abstraction layer
 from .domains import (
@@ -41,6 +46,10 @@ from .domains import (
     EvaluationResult,
     RawMetrics,
     EvaluationStatus,
+    ProgressState,
+    RepairStrategy,
+    StrategyMode,
+    RefinementHistory,
     ARCDomainAdapter,
     HumanEvalDomainAdapter,
     get_domain_adapter,
@@ -73,6 +82,8 @@ __all__ = [
     # Raw feedback (domain-agnostic)
     'RawFeedbackGenerator',
     'RawFeedbackResult',
+    'FeedbackGranularity',
+    'GRANULARITY_NAMES',
     # Domain abstraction layer
     'DomainAdapter',
     'Problem',
@@ -80,6 +91,10 @@ __all__ = [
     'EvaluationResult',
     'RawMetrics',
     'EvaluationStatus',
+    'ProgressState',
+    'RepairStrategy',
+    'StrategyMode',
+    'RefinementHistory',
     'ARCDomainAdapter',
     'HumanEvalDomainAdapter',
     'get_domain_adapter',

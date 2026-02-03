@@ -32,6 +32,10 @@ from .base import (
     EvaluationResult,
     RawMetrics,
     EvaluationStatus,
+    ProgressState,
+    RepairStrategy,
+    StrategyMode,
+    RefinementHistory,
 )
 from .arc_domain import ARCDomainAdapter
 from .humaneval_domain import HumanEvalDomainAdapter
@@ -108,6 +112,12 @@ __all__ = [
     'EvaluationResult',
     'RawMetrics',
     'EvaluationStatus',
+
+    # Strategy interfaces
+    'ProgressState',
+    'RepairStrategy',
+    'StrategyMode',
+    'RefinementHistory',
 
     # Domain adapters
     'ARCDomainAdapter',
