@@ -1,0 +1,47 @@
+Reviewer Comments:
+
+Reviewer 1
+The paper proposes a framework for program synthesis. The authors tackle the set of problems in the ARC repository to show how their contributions improve performance on solving these tasks. The main contribution of the paper is an iterative procedure where previously generated programs are scrutinized to extract relevant comments to be fed back into the model as context for generating new programs. The authors claim that this approach improves the raw synthesis made by simply using an LLM. The proposed Tracing and Correcting Programs (TCP) framework introduces a set of components that model this iterative process:
+ - the critic module provides execution traces and feedback
+ - an adaptive selection mechanism to determine the most appropriate level of details to include in the feedback, accordingly to the current level of accuracy of the generated programs
+
+The selection mechanism actually selects a set of prompt templates on the basis of the combincation of the detail levels of the two modules: the feedback engine and the strategy engine. These templates are more clear once the evaluated the content in the appendinx, since thery provide a very structured way to inject many domain knowledge aspects into the prompt. For example, Figure C2 shows a template where many heuristics of the ARC tasks are described in detail, such as the color manipulation, the symmetry properties, the grid cell counts, etc. This is a very punctual description of the task domain, and this raises the question of how much this information actually is responsible for the performance improvements, rather than the iterative feedback mechanism itself. Moreover these heuristics seems very specific to the ARC tasks, and it is not clear how well this approach would generalize to other domains.
+
+In the experiments section (section 5), for example, it would be interesting to discuss how the solved tasks are aligned with the heuristics described in the prompt. It may be the case that the tasks that remains unsolved are those whose solution is not well captured by the heuristics. A qualitative discussion of the solved vs unsolved tasks would help clarify this point. Morevoer, a specific ablation study where the heuristics are removed from the prompt templates would help clarify this point even further.
+
+From table 3, the number of failed tasks are more or less constant across the different LLM models. It would be interesting to discuss why this is the case and how mush is the intersection of these elements across the different models.
+
+In section 5.4, Figure 6 should be discussed in more detail. It is not clear how the first bar (iteration step 1) may have an improvement count, since the first iteration is the initial synthesis without any feedback. Maybe there is a step 0 with the only LLM? In this case the difference between step 0 and step 1 should be made explicit. Even if, from Table 5, it seems that no LLM is able to solve any task by itself.
+
+
+Moreover, since the iterative process is strongly linked to the evaluation of the two modules, it is crucial to understand how the impact of these evaluations affects the overall performance. There may be other definitions of the prompt templates that may work better than the ones proposed in the paper?
+
+The ablation study in section 5.5 has a centered objective, but its implementation should be improved. For example, the two level of details are set arbitrarily to level 2 and level 3 respectively. Different combinations may be evaluated to have a more complete picture of the impact of these parameters. And this should be able to address the previous point about the impact of the heuristics injected into the prompt templates.
+
+The background section (section 2) requires a review, since some phrases are not grammatically correct and some concepts are not clearly explained. For example, "A grid y ∈ Zh×w and its prediction ˆy, the pixel-wise accuracy is defined as:[...]" maybe should be rephrased as "Given a grid y ∈ Zh×w and its prediction ˆy, the pixel-wise accuracy is defined as:[...]".
+Also the defintion of the ARC task T require a revision. The Feedback Engine definition has a lot of repetitions of the term "feedback", it should be rephrased for clarity.
+
+
+The temperature adaptation mechanism (section 3.4) is reasonable, but it is discussed how it is included in the overall framework.
+
+
+## Minor comments:
+
+
+
+It is not clear how many times each task is attempted, since the initial synthesis of the LLM may vary significantly depending on the parameters used. The authors should clarify this point.
+
+The quantitative results show some inconsistencies: for exmaple, the number of solved tasks in table 4 are different from those in table 3, that is different from those in Figure 6. The authors should clarify these discrepancies.
+
+The metric "average pass@k" (section 5.1) is not defined in the paper.
+
+
+
+In summary, the proposed framework has interesting components and the idea of using feedback to improve program synthesis is interesting. However, it is not clear how much of the performance gain is due to the iterative feedback mechanism versus the detailed domain-specific heuristics injected into the prompts. However, the proposed approach seems very promising in combination with other program synthesis techniques from the literature.
+
+Reviewer 2
+The paper proposes an iterative "critic-guided repair" approach for ARC tasks that reuses failed programs and applies targeted modifications based on structured feedback . The core intuition is reasonable, and the pipeline is easy to follow, with a clear separation between diagnosing errors and selecting revision actions.
+
+The main weakness is experimental clarity and claim framing. Results are not presented in a fully consistent, easy to verify way, making it hard to attribute gains to the method rather than to evaluation or prompt/setup choices. Comparisons may also be unfair unless candidate budgets and compute are standardized across baselines.
+
+Overall, the contribution is promising, but it would benefit from tighter methodology, more careful positioning, and clearer evidence that the critic feedback drives improvements.

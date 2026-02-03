@@ -1,0 +1,44 @@
+Part 1 - Rejection key areas : 
+
+
+The most critical issue is that the reviewer misunderstood the numbers for solved tasks. They seems inconsistent across the paper (e.g., 159 in the Abstract, Table 4 shows different value and Table 3 shows different value). 
+
+
+Impact of Heuristics vs. Framework: Reviewers questioned whether the performance gains come from the iterative feedback loop or the highly specific domain knowledge (hints like "color mapping detected") injected into the prompts. 
+
+
+Methodological Gaps:
+pass@k is mentioned but not formally defined.
+The "Iteration 1" label in Figure 6 is confusing because it shows "improvements," implying a "Step 0" exists.
+The Feedback Engine description is repetitive and lacks clarity.
+
+
+The temperature adaptation is reasonable but it should be discuss on how it used in the framework.
+
+
+Ablation Completeness: The ablation study used arbitrary levels (Level 2/3) rather than a systematic evaluation of all feedback/strategy combinations.
+
+
+Use standardizes candidate budgets (samples/compute) to ensure the comparisons with baselines are transparent and fair.
+My Thoughts and Plan : 
+Need to clarify 159 represents the total unique tasks solved by any of the Qwen2.5-Coder models (7B, 14B, 32B). Others in the Table are for specific models. Need to state the explanation of the number.
+
+
+
+For the second key, I think the reviewer misunderstood between the feedback loop and the specific domain knowledge. While the hints (Table 1) provide domain context, the TCP loop is designed to apply these hints correctively when initial logic fails. The domain knowledge itself exist inside the feedback loop where the “Feedback Engine” is the main components for choosing what feedback to be included inside the prompts. And for each loop, the feedback contents might be different depending on its accuracy. This is to control the informations provided for the LLM to not make it overwhelmed.
+
+
+a. On "Iteration 1" Improvements: To clarify, "Iteration 1" in Figure 6 refers to the first refinement step following the initial zero-shot synthesis (Step 0). Since this graph is the graph for iteration distributions to show the solved and improved tasks, so Step 0 is not included here because its not related. I dont know why it should be included because it doesnt shows any improvements or solved task. But if needed, it might be possible to show in different kind of graph.
+
+b. Definition of pass@k: I will add a formal definition for "average pass@k" in Section 5.1 to ensure mathematical clarity.
+
+c. I dont understand why the reviewer raised this concerns
+
+
+Probably the framework figure need to be modified by adding the “temperature adaptation” parts. And not only that, since the “hypothesis tracking” also being used in the framework, it should be added too so no concerns raised again in the future regarding this.
+
+
+For the ablations part, since we have multiple levels of feedback and strategy, we could do more extensive experiments with different combinations of feedback and strategy levels and report it in matrix style table.
+
+
+The reason and main objective of this works is to reduce the computational usage because of our limitations on the computational budget. Im not sure if using standardize budget as the baselines is important in this case.
