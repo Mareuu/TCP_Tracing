@@ -10,9 +10,12 @@ Modules:
 - llm_service: Language model serving for TCP pipeline
 - prompt: Prompt templates for ARC task solving
 - sandbox: Safe code execution for ARC solutions
+- ablation_config: Configuration for ablation studies
+- raw_feedback: Domain-agnostic numerical feedback
+- domains: Domain abstraction layer for cross-domain support
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "TCP Team"
 
 from .tcp_dataset import get_dataset, merge_GT, convert_to_list, reformat_solutions_parquet
@@ -27,6 +30,23 @@ from .prompt import (
     grid_formatting,
 )
 from .sandbox import check_solutions, Sandbox, extract_transform, format_all_generation
+from .ablation_config import AblationConfig, get_ablation_config, list_ablation_configs, ABLATION_EXPERIMENTS
+from .raw_feedback import RawFeedbackGenerator, RawFeedbackResult
+
+# Domain abstraction layer
+from .domains import (
+    DomainAdapter,
+    Problem,
+    Feedback,
+    EvaluationResult,
+    RawMetrics,
+    EvaluationStatus,
+    ARCDomainAdapter,
+    HumanEvalDomainAdapter,
+    get_domain_adapter,
+    list_domains,
+    register_domain,
+)
 
 __all__ = [
     # Dataset
@@ -45,4 +65,24 @@ __all__ = [
     'check_solutions',
     'Sandbox',
     'extract_transform',
+    # Ablation study support
+    'AblationConfig',
+    'get_ablation_config',
+    'list_ablation_configs',
+    'ABLATION_EXPERIMENTS',
+    # Raw feedback (domain-agnostic)
+    'RawFeedbackGenerator',
+    'RawFeedbackResult',
+    # Domain abstraction layer
+    'DomainAdapter',
+    'Problem',
+    'Feedback',
+    'EvaluationResult',
+    'RawMetrics',
+    'EvaluationStatus',
+    'ARCDomainAdapter',
+    'HumanEvalDomainAdapter',
+    'get_domain_adapter',
+    'list_domains',
+    'register_domain',
 ]

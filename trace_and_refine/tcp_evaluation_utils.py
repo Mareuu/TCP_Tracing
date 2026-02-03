@@ -164,7 +164,8 @@ def execute_single_code_with_timeout(code: str, input_grid: np.ndarray, timeout:
 def generate_dynamic_feedback(
     all_pair_results: List[Dict[str, Any]],
     avg_pixel_accuracy: float,
-    force_level: Optional[int] = None
+    force_level: Optional[int] = None,
+    feedback_style: str = "interpreted"
 ) -> List[str]:
     """
     Generates feedback with a dynamic level of detail based on average accuracy.
@@ -178,7 +179,37 @@ def generate_dynamic_feedback(
             2 = detailed
             3 = pixel-level
             None = adaptive (default behavior)
+        feedback_style: Feedback style ("interpreted" or "raw")
+            - "interpreted": Domain-specific feedback with hints and explanations
+            - "raw": Pure numerical feedback without domain interpretation
     """
+    # Handle raw feedback mode
+    if feedback_style == "raw":
+        from tcp_core.raw_feedback import RawFeedbackGenerator, RawFeedbackResult
+
+        raw_feedbacks = []
+        for result in all_pair_results:
+            actual_output = result.get("actual_output")
+            expected_output = result.get("expected_output")
+            verdict = result.get("verdict", "ERROR")
+
+            # Determine execution status from verdict
+            if verdict == "ERROR":
+                exec_status = "error"
+            elif verdict == "TIMEOUT":
+                exec_status = "timeout"
+            else:
+                exec_status = "success"
+
+            raw_fb = RawFeedbackGenerator.generate_raw_feedback(
+                actual_output, expected_output, exec_status
+            )
+            raw_feedbacks.append(raw_fb)
+
+        # Return aggregated raw feedback as string
+        return [RawFeedbackGenerator.format_aggregate_as_string(raw_feedbacks)]
+
+    # Original interpreted feedback logic below
     feedback_points = []
 
     # Determine feedback level (adaptive or forced)
@@ -279,7 +310,14 @@ def generate_dynamic_feedback(
     return feedback_points
 
 
-def get_feedback_for_challenger_dynamic(challenger_code: str, train_pairs: List[Dict[str, Any]], puzzle_properties: Dict[str, Any], timeout: int = 5, force_level: Optional[int] = None) -> Tuple[Optional[float], List[str]]:
+def get_feedback_for_challenger_dynamic(
+    challenger_code: str,
+    train_pairs: List[Dict[str, Any]],
+    puzzle_properties: Dict[str, Any],
+    timeout: int = 5,
+    force_level: Optional[int] = None,
+    feedback_style: str = "interpreted"
+) -> Tuple[Optional[float], List[str]]:
     """
     Generates feedback for a challenger code with a dynamic level of detail.
 
@@ -289,6 +327,7 @@ def get_feedback_for_challenger_dynamic(challenger_code: str, train_pairs: List[
         puzzle_properties: Dictionary of puzzle properties
         timeout: Execution timeout in seconds
         force_level: Optional forced feedback level for ablation (0-3, None=adaptive)
+        feedback_style: Feedback style ("interpreted" or "raw")
     """
     if not train_pairs:
         return 0.0, ["No training pairs to evaluate."]
@@ -326,6 +365,9 @@ def get_feedback_for_challenger_dynamic(challenger_code: str, train_pairs: List[
 
     average_pixel_accuracy = sum(all_accuracies) / len(all_accuracies)
 
-    feedback_strings = generate_dynamic_feedback(all_pair_results, average_pixel_accuracy, force_level=force_level)
+    feedback_strings = generate_dynamic_feedback(
+        all_pair_results, average_pixel_accuracy,
+        force_level=force_level, feedback_style=feedback_style
+    )
 
     return average_pixel_accuracy, feedback_strings

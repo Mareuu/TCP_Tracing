@@ -24,37 +24,51 @@ import time
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-from tcp_core import get_dataset, LLM_serv
+from tcp_core import get_dataset, LLM_serv, AblationConfig
 from tcp_evaluation_utils import get_feedback_for_challenger_dynamic, NumpyEncoder, parse_code_from_response
 
 
-def analyze_transformation_pattern(train_pairs):
-    """Analyze the transformation pattern to provide structural hints."""
+def analyze_transformation_pattern(train_pairs, config: AblationConfig = None):
+    """Analyze the transformation pattern to provide structural hints.
+
+    Args:
+        train_pairs: List of training input/output pairs
+        config: AblationConfig to control which hints are generated
+
+    Returns:
+        List of structural hint strings (empty if hints are disabled)
+    """
+    # If structural hints are disabled, return empty list
+    if config and not config.enable_structural_hints:
+        return []
+
     hints = []
 
-    # Check if grid size changes
-    size_changes = False
-    for pair in train_pairs:
-        if np.array(pair['input']).shape != np.array(pair['output']).shape:
-            size_changes = True
-            break
+    # Check if grid size changes (controlled by enable_size_change_hints)
+    if config is None or config.enable_size_change_hints:
+        size_changes = False
+        for pair in train_pairs:
+            if np.array(pair['input']).shape != np.array(pair['output']).shape:
+                size_changes = True
+                break
 
-    if size_changes:
-        hints.append("Grid dimensions change between input and output")
-    else:
-        hints.append("Grid dimensions are preserved")
+        if size_changes:
+            hints.append("Grid dimensions change between input and output")
+        else:
+            hints.append("Grid dimensions are preserved")
 
-    # Check color usage
-    input_colors = set()
-    output_colors = set()
-    for pair in train_pairs:
-        input_colors.update(np.array(pair['input']).flatten().tolist())
-        output_colors.update(np.array(pair['output']).flatten().tolist())
+    # Check color usage (controlled by enable_color_change_hints)
+    if config is None or config.enable_color_change_hints:
+        input_colors = set()
+        output_colors = set()
+        for pair in train_pairs:
+            input_colors.update(np.array(pair['input']).flatten().tolist())
+            output_colors.update(np.array(pair['output']).flatten().tolist())
 
-    if output_colors - input_colors:
-        hints.append(f"New colors appear: {output_colors - input_colors}")
-    if input_colors - output_colors:
-        hints.append(f"Colors removed: {input_colors - output_colors}")
+        if output_colors - input_colors:
+            hints.append(f"New colors appear: {output_colors - input_colors}")
+        if input_colors - output_colors:
+            hints.append(f"Colors removed: {input_colors - output_colors}")
 
     return hints
 
@@ -109,6 +123,23 @@ def parse_arguments():
     rex_group.add_argument("--temperature_mode", type=str, default="adaptive", choices=["adaptive", "fixed"],
                         help="Temperature mode: 'adaptive' (default) adjusts based on iteration/accuracy, 'fixed' uses base temperature")
 
+    # Ablation study parameters
+    ablation_group = parser.add_argument_group("Ablation study parameters")
+    ablation_group.add_argument("--ablation_mode", type=str, default="full",
+                               choices=["full", "no_heuristics", "feedback_only", "heuristics_only", "no_feedback", "raw_feedback_only", "custom"],
+                               help="Ablation mode: 'full' (default), 'no_heuristics', 'feedback_only', 'heuristics_only', 'no_feedback', 'raw_feedback_only', 'custom'")
+    ablation_group.add_argument("--feedback_style", type=str, default=None,
+                               choices=["interpreted", "raw"],
+                               help="Feedback style: 'interpreted' (default) for domain-specific feedback, 'raw' for pure numerical feedback")
+    ablation_group.add_argument("--disable_structural_hints", action="store_true",
+                               help="Disable structural hints (grid size/color change analysis)")
+    ablation_group.add_argument("--disable_adaptive_strategy", action="store_true",
+                               help="Disable adaptive strategy selection based on accuracy")
+    ablation_group.add_argument("--disable_accuracy_hints", action="store_true",
+                               help="Disable accuracy-based hints in prompts (e.g., 'HINT: Almost there!')")
+    ablation_group.add_argument("--disable_color_mapping", action="store_true",
+                               help="Disable color mapping information in prompts")
+
     advanced_group = parser.add_argument_group("Advanced parameters")
     advanced_group.add_argument("--seed", type=int, default=42,
                             help="Random seed")
@@ -120,6 +151,10 @@ def parse_arguments():
 
 
 args = parse_arguments()
+
+# Create ablation configuration from args
+ablation_config = AblationConfig.from_args(args)
+print(f"\n{ablation_config.summary()}\n")
 
 os.makedirs(args.path_save_res, exist_ok=True)
 
@@ -160,19 +195,24 @@ for item in feedback_data:
         # Handle plain string format
         champion_code = failed_code_raw
 
-    # Get initial champion accuracy (use force_level if specified)
-    force_level = args.feedback_level if args.feedback_level >= 0 else None
+    # Get initial champion accuracy (use force_level and feedback_style from ablation config)
+    force_level = ablation_config.feedback_level if ablation_config.feedback_level >= 0 else None
+    feedback_style = ablation_config.feedback_style
     champion_accuracy, champion_feedback = get_feedback_for_challenger_dynamic(
-        champion_code, task_data['train'], puzzle_properties, force_level=force_level)
+        champion_code, task_data['train'], puzzle_properties,
+        force_level=force_level, feedback_style=feedback_style)
     if champion_accuracy is None:
         champion_accuracy = 0.0
 
     print(f"\n=== Task {task_id} ===")
     print(f"Initial accuracy: {champion_accuracy:.2%}")
 
-    # Analyze transformation patterns
-    structural_hints = analyze_transformation_pattern(task_data['train'])
-    print(f"Pattern analysis: {', '.join(structural_hints)}")
+    # Analyze transformation patterns (controlled by ablation config)
+    structural_hints = analyze_transformation_pattern(task_data['train'], ablation_config)
+    if structural_hints:
+        print(f"Pattern analysis: {', '.join(structural_hints)}")
+    else:
+        print("Pattern analysis: DISABLED (ablation mode)")
 
     log_file_path = os.path.join(args.path_save_res, f"{task_id}_refinement_log.jsonl")
     debug_file_path = log_file_path.replace('.jsonl', '_debug.txt')
@@ -180,10 +220,15 @@ for item in feedback_data:
     # Initialize debug file
     with open(debug_file_path, 'w') as debug_file:
         debug_file.write(f"=== Task {task_id} TCP Refinement Debug Log ===\n")
+        debug_file.write(f"Ablation config: {ablation_config.config_name}\n")
         debug_file.write(f"Initial champion accuracy: {champion_accuracy:.4f}\n")
         debug_file.write(f"Max iterations: {args.max_refinement_retries}\n")
         debug_file.write(f"Base temperature: {args.temperature}\n")
-        debug_file.write(f"Pattern hints: {', '.join(structural_hints)}\n\n")
+        debug_file.write(f"Temperature mode: {ablation_config.temperature_mode}\n")
+        debug_file.write(f"Feedback style: {ablation_config.feedback_style}\n")
+        debug_file.write(f"Pattern hints: {', '.join(structural_hints) if structural_hints else 'DISABLED'}\n")
+        debug_file.write(f"Adaptive strategy: {'ON' if ablation_config.enable_adaptive_strategy else 'OFF'}\n")
+        debug_file.write(f"Accuracy hints: {'ON' if ablation_config.enable_accuracy_hints else 'OFF'}\n\n")
 
     task_start_time = time.time()
     total_refinement_time = 0.0
@@ -194,7 +239,8 @@ for item in feedback_data:
             "type": "original",
             "code": champion_code,
             "pixel_accuracy": champion_accuracy,
-            "feedback": champion_feedback
+            "feedback": champion_feedback,
+            "ablation_config": ablation_config.to_dict()
         }
         log_file.write(json.dumps(initial_log_entry, cls=NumpyEncoder) + '\n')
 
@@ -218,27 +264,33 @@ for item in feedback_data:
             print(f"Current Champion Accuracy: {champion_accuracy:.4f}")
 
             # Determine repair strategy based on accuracy and history
-            if champion_accuracy < 0.25 and i > 2:
-                repair_strategy = "complete_rewrite"
-                print("Strategy: COMPLETE REWRITE (fundamentally wrong approach)")
-            elif champion_accuracy < 0.5:
-                repair_strategy = "major_restructure"
-                print("Strategy: Major restructuring needed")
-            elif champion_accuracy < 0.8:
-                repair_strategy = "targeted_fix"
-                print("Strategy: Targeted fixes")
-            elif champion_accuracy < 0.95:
-                repair_strategy = "fine_tune"
-                print("Strategy: Fine-tuning edge cases")
-            elif champion_accuracy < 1.0:
-                repair_strategy = "precision_fix"
-                print("Strategy: PRECISION FIX (very close to solution)")
+            # (controlled by ablation_config.enable_adaptive_strategy)
+            if ablation_config.enable_adaptive_strategy:
+                if champion_accuracy < 0.25 and i > 2:
+                    repair_strategy = "complete_rewrite"
+                    print("Strategy: COMPLETE REWRITE (fundamentally wrong approach)")
+                elif champion_accuracy < 0.5:
+                    repair_strategy = "major_restructure"
+                    print("Strategy: Major restructuring needed")
+                elif champion_accuracy < 0.8:
+                    repair_strategy = "targeted_fix"
+                    print("Strategy: Targeted fixes")
+                elif champion_accuracy < 0.95:
+                    repair_strategy = "fine_tune"
+                    print("Strategy: Fine-tuning edge cases")
+                elif champion_accuracy < 1.0:
+                    repair_strategy = "precision_fix"
+                    print("Strategy: PRECISION FIX (very close to solution)")
+                else:
+                    repair_strategy = "perfect"
+                    print("Strategy: Already perfect!")
             else:
-                repair_strategy = "perfect"
-                print("Strategy: Already perfect!")
+                # Fixed strategy when adaptive strategy is disabled
+                repair_strategy = "standard_repair"
+                print("Strategy: STANDARD REPAIR (adaptive strategy disabled)")
 
-            # Temperature selection based on mode
-            if args.temperature_mode == "fixed":
+            # Temperature selection based on mode (controlled by ablation_config)
+            if ablation_config.temperature_mode == "fixed":
                 current_temperature = args.temperature
             else:  # adaptive mode
                 if i < 3:
@@ -456,29 +508,34 @@ Your task is to act as an expert code debugger. Follow these steps:
 
 Your new hypothesis MUST be different from the current code's logic and from previously tried approaches."""
 
-            # Add hints based on accuracy
-            if champion_accuracy < 0.25:
-                prompt_template += "\n\nHINT: The transformation logic is fundamentally wrong. Consider a simpler approach."
-            elif champion_accuracy < 0.5:
-                prompt_template += "\n\nHINT: Check transformation order, array indexing, and boundary conditions."
-            elif champion_accuracy < 0.8:
-                prompt_template += "\n\nHINT: Focus on edge cases and special conditions that might be failing."
-            else:
-                prompt_template += "\n\nHINT: Almost there! Look for off-by-one errors or corner cases."
+            # Add hints based on accuracy (controlled by ablation_config.enable_accuracy_hints)
+            if ablation_config.enable_accuracy_hints:
+                if champion_accuracy < 0.25:
+                    prompt_template += "\n\nHINT: The transformation logic is fundamentally wrong. Consider a simpler approach."
+                elif champion_accuracy < 0.5:
+                    prompt_template += "\n\nHINT: Check transformation order, array indexing, and boundary conditions."
+                elif champion_accuracy < 0.8:
+                    prompt_template += "\n\nHINT: Focus on edge cases and special conditions that might be failing."
+                else:
+                    prompt_template += "\n\nHINT: Almost there! Look for off-by-one errors or corner cases."
 
-            # Best-of-N sampling
-            if repair_strategy == "complete_rewrite":
-                num_samples = 4  # Samples for complete rewrites
-            elif repair_strategy == "major_restructure":
-                num_samples = 3
-            elif repair_strategy == "precision_fix":
-                num_samples = 5  # Many samples for final push to 100%
-            elif i < 3 or champion_accuracy < 0.5:
-                num_samples = 3
-            elif i < 8:  # Keep generating multiple samples longer
-                num_samples = 2
+            # Best-of-N sampling (controlled by ablation_config.enable_adaptive_strategy)
+            if ablation_config.enable_adaptive_strategy:
+                if repair_strategy == "complete_rewrite":
+                    num_samples = 4  # Samples for complete rewrites
+                elif repair_strategy == "major_restructure":
+                    num_samples = 3
+                elif repair_strategy == "precision_fix":
+                    num_samples = 5  # Many samples for final push to 100%
+                elif i < 3 or champion_accuracy < 0.5:
+                    num_samples = 3
+                elif i < 8:  # Keep generating multiple samples longer
+                    num_samples = 2
+                else:
+                    num_samples = 1
             else:
-                num_samples = 1
+                # Fixed sampling when adaptive strategy is disabled
+                num_samples = 2
 
             if num_samples > 1:
                 print(f"Generating {num_samples} solutions and selecting best...")
@@ -525,7 +582,8 @@ Your new hypothesis MUST be different from the current code's logic and from pre
 
                 if sample_code:
                     sample_accuracy, sample_feedback = get_feedback_for_challenger_dynamic(
-                        sample_code, task_data['train'], puzzle_properties, force_level=force_level)
+                        sample_code, task_data['train'], puzzle_properties,
+                        force_level=force_level, feedback_style=feedback_style)
                     if sample_accuracy is None:
                         sample_accuracy = 0.0
 
@@ -600,7 +658,8 @@ Your new hypothesis MUST be different from the current code's logic and from pre
                 print(f"Perfect score on training set!")
                 if task_data.get('test'):
                     test_accuracy, test_feedback = get_feedback_for_challenger_dynamic(
-                        champion_code, task_data['test'], puzzle_properties, force_level=force_level)
+                        champion_code, task_data['test'], puzzle_properties,
+                        force_level=force_level, feedback_style=feedback_style)
                     if test_accuracy == 1.0:
                         print(f"SUCCESS: Task {task_id} solved on test set!")
                         log_entry = {
