@@ -163,19 +163,43 @@ def execute_single_code_with_timeout(code: str, input_grid: np.ndarray, timeout:
 
 def generate_dynamic_feedback(
     all_pair_results: List[Dict[str, Any]],
-    avg_pixel_accuracy: float
+    avg_pixel_accuracy: float,
+    force_level: Optional[int] = None
 ) -> List[str]:
     """
     Generates feedback with a dynamic level of detail based on average accuracy.
+
+    Args:
+        all_pair_results: List of evaluation results for each training pair
+        avg_pixel_accuracy: Average pixel accuracy across all pairs
+        force_level: Optional forced feedback level for ablation studies:
+            0 = no feedback (returns minimal info)
+            1 = summary only
+            2 = detailed
+            3 = pixel-level
+            None = adaptive (default behavior)
     """
     feedback_points = []
 
-    # Determine feedback level
-    feedback_level = 'summary'
-    if avg_pixel_accuracy >= 0.9:
-        feedback_level = 'pixel-level'
-    elif avg_pixel_accuracy >= 0.5:
-        feedback_level = 'detailed'
+    # Determine feedback level (adaptive or forced)
+    if force_level is not None:
+        if force_level == 0:
+            return ["Feedback disabled for ablation study."]
+        elif force_level == 1:
+            feedback_level = 'summary'
+        elif force_level == 2:
+            feedback_level = 'detailed'
+        elif force_level == 3:
+            feedback_level = 'pixel-level'
+        else:
+            feedback_level = 'summary'  # fallback
+    else:
+        # Adaptive feedback level based on accuracy
+        feedback_level = 'summary'
+        if avg_pixel_accuracy >= 0.9:
+            feedback_level = 'pixel-level'
+        elif avg_pixel_accuracy >= 0.5:
+            feedback_level = 'detailed'
 
     # Generate high-level summary
     verdicts = {res.get("verdict") for res in all_pair_results}
@@ -255,9 +279,16 @@ def generate_dynamic_feedback(
     return feedback_points
 
 
-def get_feedback_for_challenger_dynamic(challenger_code: str, train_pairs: List[Dict[str, Any]], puzzle_properties: Dict[str, Any], timeout: int = 5) -> Tuple[Optional[float], List[str]]:
+def get_feedback_for_challenger_dynamic(challenger_code: str, train_pairs: List[Dict[str, Any]], puzzle_properties: Dict[str, Any], timeout: int = 5, force_level: Optional[int] = None) -> Tuple[Optional[float], List[str]]:
     """
     Generates feedback for a challenger code with a dynamic level of detail.
+
+    Args:
+        challenger_code: The Python code to evaluate
+        train_pairs: List of input/output training pairs
+        puzzle_properties: Dictionary of puzzle properties
+        timeout: Execution timeout in seconds
+        force_level: Optional forced feedback level for ablation (0-3, None=adaptive)
     """
     if not train_pairs:
         return 0.0, ["No training pairs to evaluate."]
@@ -295,6 +326,6 @@ def get_feedback_for_challenger_dynamic(challenger_code: str, train_pairs: List[
 
     average_pixel_accuracy = sum(all_accuracies) / len(all_accuracies)
 
-    feedback_strings = generate_dynamic_feedback(all_pair_results, average_pixel_accuracy)
+    feedback_strings = generate_dynamic_feedback(all_pair_results, average_pixel_accuracy, force_level=force_level)
 
     return average_pixel_accuracy, feedback_strings

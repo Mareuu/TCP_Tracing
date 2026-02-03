@@ -104,6 +104,10 @@ def parse_arguments():
     rex_group = parser.add_argument_group("Refinement parameters")
     rex_group.add_argument("--max_refinement_retries", type=int, default=10,
                         help="Maximum number of refinement retries (default: 10)")
+    rex_group.add_argument("--feedback_level", type=int, default=-1, choices=[-1, 0, 1, 2, 3],
+                        help="Force specific feedback level for ablation: -1=adaptive (default), 0=none, 1=summary, 2=detailed, 3=pixel-level")
+    rex_group.add_argument("--temperature_mode", type=str, default="adaptive", choices=["adaptive", "fixed"],
+                        help="Temperature mode: 'adaptive' (default) adjusts based on iteration/accuracy, 'fixed' uses base temperature")
 
     advanced_group = parser.add_argument_group("Advanced parameters")
     advanced_group.add_argument("--seed", type=int, default=42,
@@ -156,9 +160,10 @@ for item in feedback_data:
         # Handle plain string format
         champion_code = failed_code_raw
 
-    # Get initial champion accuracy
+    # Get initial champion accuracy (use force_level if specified)
+    force_level = args.feedback_level if args.feedback_level >= 0 else None
     champion_accuracy, champion_feedback = get_feedback_for_challenger_dynamic(
-        champion_code, task_data['train'], puzzle_properties)
+        champion_code, task_data['train'], puzzle_properties, force_level=force_level)
     if champion_accuracy is None:
         champion_accuracy = 0.0
 
@@ -232,15 +237,18 @@ for item in feedback_data:
                 repair_strategy = "perfect"
                 print("Strategy: Already perfect!")
 
-            # Adaptive temperature
-            if i < 3:
-                current_temperature = min(0.7, args.temperature * 1.75)
-            elif champion_accuracy > 0.85:
-                current_temperature = max(0.15, args.temperature * 0.4)
-            elif champion_accuracy > 0.7:
-                current_temperature = max(0.25, args.temperature * 0.6)
-            else:
+            # Temperature selection based on mode
+            if args.temperature_mode == "fixed":
                 current_temperature = args.temperature
+            else:  # adaptive mode
+                if i < 3:
+                    current_temperature = min(0.7, args.temperature * 1.75)
+                elif champion_accuracy > 0.85:
+                    current_temperature = max(0.15, args.temperature * 0.4)
+                elif champion_accuracy > 0.7:
+                    current_temperature = max(0.25, args.temperature * 0.6)
+                else:
+                    current_temperature = args.temperature
 
             print(f"Using temperature: {current_temperature:.2f}")
 
@@ -517,7 +525,7 @@ Your new hypothesis MUST be different from the current code's logic and from pre
 
                 if sample_code:
                     sample_accuracy, sample_feedback = get_feedback_for_challenger_dynamic(
-                        sample_code, task_data['train'], puzzle_properties)
+                        sample_code, task_data['train'], puzzle_properties, force_level=force_level)
                     if sample_accuracy is None:
                         sample_accuracy = 0.0
 
@@ -592,7 +600,7 @@ Your new hypothesis MUST be different from the current code's logic and from pre
                 print(f"Perfect score on training set!")
                 if task_data.get('test'):
                     test_accuracy, test_feedback = get_feedback_for_challenger_dynamic(
-                        champion_code, task_data['test'], puzzle_properties)
+                        champion_code, task_data['test'], puzzle_properties, force_level=force_level)
                     if test_accuracy == 1.0:
                         print(f"SUCCESS: Task {task_id} solved on test set!")
                         log_entry = {
